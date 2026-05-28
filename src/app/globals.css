@@ -1,0 +1,32 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --cream: #FAF7F2;
+  --ink: #1A1410;
+  --accent: #C8956C;
+  --accent-light: #E8C5A8;
+  --border: #E8E2D9;
+  --card: #FFFFFF;
+  --muted: #8B7E74;
+}
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: 'DM Sans', sans-serif;
+}
+
+.font-heading {
+  font-family: 'DM Serif Display', serif;
+}
+
+@theme inline {
+  --color-cream: var(--cream);
+  --color-ink: var(--ink);
+  --color-accent: var(--accent);
+  --color-accent-light: var(--accent-light);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+}
