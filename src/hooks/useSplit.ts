@@ -6,14 +6,13 @@ import { PERSON_COLORS, generateId } from '@/lib/calculations';
 const defaultState: SplitState = {
   people: [],
   items: [],
-  tip: 0,
-  currency: 'ARS',
+  tip: 20,        // Chile: 20% por defecto
+  currency: 'CLP', // Moneda chilena por defecto
 };
 
 export function useSplit(initial?: SplitState) {
   const [state, setState] = useState<SplitState>(initial ?? defaultState);
 
-  // People
   const addPerson = useCallback(() => {
     setState((s) => {
       const color = PERSON_COLORS[s.people.length % PERSON_COLORS.length];
@@ -40,14 +39,13 @@ export function useSplit(initial?: SplitState) {
     }));
   }, []);
 
-  // Items
   const addItem = useCallback((name = '', price = 0) => {
     setState((s) => {
       const item: Item = {
         id: generateId(),
         name,
         price,
-        assignedTo: s.people.map((p) => p.id), // default: everyone
+        assignedTo: [], // sin asignación por defecto
       };
       return { ...s, items: [...s.items, item] };
     });
@@ -73,8 +71,7 @@ export function useSplit(initial?: SplitState) {
         const next = has
           ? item.assignedTo.filter((id) => id !== personId)
           : [...item.assignedTo, personId];
-        // at least one person must remain
-        return { ...item, assignedTo: next.length ? next : item.assignedTo };
+        return { ...item, assignedTo: next }; // permite vacío
       }),
     }));
   }, []);
@@ -85,13 +82,12 @@ export function useSplit(initial?: SplitState) {
         id: generateId(),
         name: si.name,
         price: si.price,
-        assignedTo: s.people.map((p) => p.id),
+        assignedTo: [], // sin asignación por defecto
       }));
       return { ...s, items: [...s.items, ...newItems] };
     });
   }, []);
 
-  // Tip & currency
   const setTip = useCallback((tip: number) => {
     setState((s) => ({ ...s, tip }));
   }, []);
@@ -103,18 +99,10 @@ export function useSplit(initial?: SplitState) {
   const reset = useCallback(() => setState(defaultState), []);
 
   return {
-    state,
-    setState,
-    addPerson,
-    updatePerson,
-    removePerson,
-    addItem,
-    updateItem,
-    removeItem,
-    togglePersonOnItem,
-    addScannedItems,
-    setTip,
-    setCurrency,
-    reset,
+    state, setState,
+    addPerson, updatePerson, removePerson,
+    addItem, updateItem, removeItem,
+    togglePersonOnItem, addScannedItems,
+    setTip, setCurrency, reset,
   };
 }

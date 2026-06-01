@@ -8,16 +8,16 @@ export interface Item {
   id: string;
   name: string;
   price: number;
-  assignedTo: string[]; // person IDs
+  assignedTo: string[]; // person IDs — vacío = sin asignar
 }
 
-export type TipOption = 0 | 10 | 15 | 'custom';
+export type TipOption = 0 | 10 | 15 | 20 | 'custom';
 export type Currency = 'ARS' | 'USD' | 'CLP' | 'EUR';
 
 export interface SplitState {
   people: Person[];
   items: Item[];
-  tip: number; // porcentaje final (0-100)
+  tip: number;
   currency: Currency;
 }
 
@@ -32,4 +32,5 @@ export interface PersonSummary {
 export interface ScannedItem {
   name: string;
   price: number;
+  quantity?: number;
 }

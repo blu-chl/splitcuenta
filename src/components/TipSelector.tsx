@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import type { Currency } from '@/types';
 
-const PRESETS = [0, 10, 15] as const;
-const CURRENCIES: Currency[] = ['ARS', 'USD', 'CLP', 'EUR'];
+const PRESETS = [0, 10, 15, 20] as const;
+const CURRENCIES: Currency[] = ['CLP', 'ARS', 'USD', 'EUR'];
 
 interface Props {
   tip: number;
@@ -33,13 +33,13 @@ export default function TipSelector({ tip, currency, onTipChange, onCurrencyChan
     if (!isNaN(n) && n >= 0 && n <= 100) onTipChange(n);
   };
 
+  const isPreset = PRESETS.includes(tip as typeof PRESETS[number]);
+
   return (
     <section className="bg-white rounded-2xl border border-[#E8E2D9] p-4 shadow-sm space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading text-lg text-[#1A1410]">Propina & Moneda</h2>
-      </div>
+      <h2 className="font-heading text-lg text-[#1A1410]">Propina & Moneda</h2>
 
-      {/* Tip */}
+      {/* Propina */}
       <div>
         <p className="text-xs text-[#8B7E74] mb-2 uppercase tracking-wide">Propina</p>
         <div className="flex gap-2 flex-wrap">
@@ -47,23 +47,24 @@ export default function TipSelector({ tip, currency, onTipChange, onCurrencyChan
             <button
               key={p}
               onClick={() => handlePreset(p)}
-              className="px-3 py-1.5 rounded-full text-sm font-medium transition-all"
+              className="px-3 py-1.5 rounded-full text-sm font-medium transition-all border"
               style={{
                 backgroundColor: !customMode && tip === p ? '#1A1410' : '#FAF7F2',
                 color: !customMode && tip === p ? 'white' : '#1A1410',
-                border: '1.5px solid #E8E2D9',
+                borderColor: '#E8E2D9',
               }}
             >
               {p === 0 ? 'Sin propina' : `${p}%`}
+              {p === 20 && <span className="ml-1 text-xs opacity-60">(CL)</span>}
             </button>
           ))}
           <button
             onClick={handleCustom}
-            className="px-3 py-1.5 rounded-full text-sm font-medium transition-all"
+            className="px-3 py-1.5 rounded-full text-sm font-medium transition-all border"
             style={{
               backgroundColor: customMode ? '#1A1410' : '#FAF7F2',
               color: customMode ? 'white' : '#1A1410',
-              border: '1.5px solid #E8E2D9',
+              borderColor: '#E8E2D9',
             }}
           >
             Otro
@@ -83,9 +84,12 @@ export default function TipSelector({ tip, currency, onTipChange, onCurrencyChan
             <span className="text-[#8B7E74] text-sm">%</span>
           </div>
         )}
+        {!customMode && !isPreset && (
+          <p className="text-xs text-[#8B7E74] mt-1">Propina personalizada: {tip}%</p>
+        )}
       </div>
 
-      {/* Currency */}
+      {/* Moneda */}
       <div>
         <p className="text-xs text-[#8B7E74] mb-2 uppercase tracking-wide">Moneda</p>
         <div className="flex gap-2 flex-wrap">
@@ -93,11 +97,11 @@ export default function TipSelector({ tip, currency, onTipChange, onCurrencyChan
             <button
               key={c}
               onClick={() => onCurrencyChange(c)}
-              className="px-3 py-1.5 rounded-full text-sm font-medium transition-all"
+              className="px-3 py-1.5 rounded-full text-sm font-medium transition-all border"
               style={{
                 backgroundColor: currency === c ? '#C8956C' : '#FAF7F2',
                 color: currency === c ? 'white' : '#1A1410',
-                border: '1.5px solid #E8E2D9',
+                borderColor: '#E8E2D9',
               }}
             >
               {c}
