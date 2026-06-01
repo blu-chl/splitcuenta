@@ -17,7 +17,7 @@ export type Currency = 'ARS' | 'USD' | 'CLP' | 'EUR';
 export interface SplitState {
   people: Person[];
   items: Item[];
-  tip: number; // final tip percentage (0-100)
+  tip: number; // porcentaje final (0-100)
   currency: Currency;
 }
 
@@ -32,12 +32,4 @@ export interface PersonSummary {
 export interface ScannedItem {
   name: string;
   price: number;
-}
-
-export type OcrProvider = 'claude' | 'google' | 'tesseract';
-
-export interface OcrResult {
-  items: ScannedItem[];
-  provider: OcrProvider;
-  raw?: string;
 }
