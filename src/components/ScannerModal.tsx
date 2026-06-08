@@ -17,7 +17,8 @@ export default function ScannerModal({ onScan, onClose }: Props) {
   const [progress, setProgress] = useState(0);
   const [scanned, setScanned] = useState<ScannedItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
 
   // 1. Usuario elige archivo → mostrar herramienta de crop
   const handleFile = (file: File) => {
@@ -113,22 +114,46 @@ export default function ScannerModal({ onScan, onClose }: Props) {
           {/* STEP: upload */}
           {step === 'upload' && (
             <>
-              <div
-                onClick={() => fileRef.current?.click()}
-                className="border-2 border-dashed border-[#E8E2D9] rounded-2xl p-8 text-center cursor-pointer hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
-              >
-                <div className="text-5xl mb-3">📸</div>
-                <p className="font-medium text-[#1A1410]">Toca para subir foto</p>
-                <p className="text-sm text-[#8B7E74] mt-1">o usa la cámara del celular</p>
-                <p className="text-xs text-[#8B7E74] mt-3 bg-[#F0EBE4] rounded-full px-3 py-1 inline-block">
-                  100% local · sin internet · gratis
-                </p>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Cámara */}
+                <button
+                  onClick={() => cameraRef.current?.click()}
+                  className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
+                >
+                  <span className="text-4xl">📷</span>
+                  <span className="font-medium text-sm text-[#1A1410]">Tomar foto</span>
+                  <span className="text-xs text-[#8B7E74]">Usar cámara</span>
+                </button>
+
+                {/* Galería */}
+                <button
+                  onClick={() => galleryRef.current?.click()}
+                  className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
+                >
+                  <span className="text-4xl">🖼️</span>
+                  <span className="font-medium text-sm text-[#1A1410]">Elegir foto</span>
+                  <span className="text-xs text-[#8B7E74]">Desde galería</span>
+                </button>
               </div>
+
+              <p className="text-xs text-center text-[#8B7E74]">
+                100% local · sin internet · gratis
+              </p>
+
+              {/* Input cámara — fuerza apertura de cámara */}
               <input
-                ref={fileRef}
+                ref={cameraRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+              />
+              {/* Input galería — sin capture, abre el selector de archivos */}
+              <input
+                ref={galleryRef}
+                type="file"
+                accept="image/*"
                 className="hidden"
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
