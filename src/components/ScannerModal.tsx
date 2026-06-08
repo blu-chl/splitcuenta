@@ -46,6 +46,13 @@ export default function ScannerModal({ onScan, onClose }: Props) {
         },
       });
 
+      // PSM 4 = columna única de texto (ideal para boletas)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (worker as any).setParameters({
+        tessedit_pageseg_mode: '4',
+        preserve_interword_spaces: '1',
+      });
+
       const { data: { text } } = await worker.recognize(processed);
       await worker.terminate();
       setProgress(95);
