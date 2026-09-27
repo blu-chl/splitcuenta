@@ -158,6 +158,12 @@ function findPaper(g: Uint8Array, w: number, h: number): Paper | null {
   return { x0: best.x0, y0: best.y0, x1: best.x1, y1: best.y1, mask };
 }
 
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const v = values.slice().sort((a, b) => a - b);
+  return v[v.length >> 1];
+}
+
 /** Mínimo local (erosión) de una máscara 0/1. */
 function erode(m: Uint8Array, w: number, h: number, r: number): Uint8Array {
   const inv = new Uint8Array(m.length);
@@ -202,24 +208,25 @@ function skewAndPitch(g: Uint8Array, w: number, h: number): { angle: number; pit
     if (sc > bestScore) { bestScore = sc; bestAngle = d; }
   }
 
-  // Distancia entre líneas: primer pico fuerte de la autocorrelación del perfil
-  const hist = profile(bestAngle);
-  let lo = 0, hi = hist.length - 1;
-  while (lo < hi && !hist[lo]) lo++;
-  while (hi > lo && !hist[hi]) hi--;
-  const prof = Array.from(hist.slice(lo, hi + 1));
-  const avg = prof.reduce((a, b) => a + b, 0) / prof.length;
-  const ac = (lag: number) => {
-    let s = 0;
-    for (let i = 0; i + lag < prof.length; i++) s += (prof[i] - avg) * (prof[i + lag] - avg);
-    return s / (prof.length - lag);
-  };
-  const ac0 = ac(0);
-  let pitch: number | null = null;
-  for (let lag = 4; lag < Math.min(90, prof.length / 3); lag++) {
-    const v = ac(lag);
-    if (v > ac0 * 0.25 && v >= ac(lag - 1) && v >= ac(lag + 1)) { pitch = lag; break; }
+  // Distancia entre líneas: cada línea de texto es una franja de filas con
+  // tinta; la mediana entre centros de franjas vecinas es el paso (robusta a
+  // boletas cortas, márgenes grandes y líneas que faltan).
+  const raw = profile(bestAngle);
+  const hist = raw.map((_, i) => (raw[i - 1] ?? 0) / 4 + raw[i] / 2 + (raw[i + 1] ?? 0) / 4);
+  let peak = 0;
+  for (const v of hist) if (v > peak) peak = v;
+  const centers: number[] = [];
+  let start = -1;
+  for (let i = 0; i <= hist.length; i++) {
+    const on = i < hist.length && hist[i] > peak * 0.15;
+    if (on && start < 0) start = i;
+    else if (!on && start >= 0) {
+      if (i - start >= 2) centers.push((start + i - 1) / 2);
+      start = -1;
+    }
   }
+  const gaps = centers.slice(1).map((c, k) => c - centers[k]).filter((g) => g >= 4);
+  const pitch = gaps.length >= 2 ? median(gaps) : null;
   return { angle: bestAngle, pitch };
 }
 
@@ -278,9 +285,15 @@ export async function prepareReceiptImage(source: File | string): Promise<Prepar
     const w = o.c.width, h = o.c.height;
     const gray = grayOf(o.ctx, w, h);
     const q = canvas(w / 4, h / 4);
+    q.ctx.drawImage(o.c, 0, 0, q.c.width, q.c.height);
+    const qw = q.c.width, qh = q.c.height;
+    const qg = grayOf(q.ctx, qw, qh);
+    const r = Math.max(2, Math.round(TARGET_PITCH / 4 / 3));
+    const lm = localMax(qg, qw, qh, r); // papel sin texto (el máximo local borra las letras)
 
-    // Máscara del papel en coordenadas finales (a 1/4), un poco erosionada
-    // para que el borde papel/mesa no quede como un marco negro.
+    // Máscara del papel en coordenadas finales (a 1/4). La mancha de la foto
+    // chica solo da la zona aproximada; el borde exacto sale de esta imagen,
+    // para no comerse la primera letra cuando el texto va pegado al borde.
     let paperMask: Uint8Array | null = null;
     if (box) {
       const sw = s.c.width, sh = s.c.height;
@@ -291,19 +304,30 @@ export async function prepareReceiptImage(source: File | string): Promise<Prepar
         mi.data[i * 4 + 3] = 255;
       }
       mc.ctx.putImageData(mi, 0, 0);
-      const mq = canvas(q.c.width, q.c.height);
+      const mq = canvas(qw, qh);
       mq.ctx.fillStyle = '#000';
-      mq.ctx.fillRect(0, 0, mq.c.width, mq.c.height);
-      place(mq.ctx, q.c.width / w, mc.c, crop.x0 * small, crop.y0 * small, cw * small, ch * small);
-      const mg = grayOf(mq.ctx, mq.c.width, mq.c.height);
-      const bin = new Uint8Array(mg.length);
-      for (let i = 0; i < mg.length; i++) bin[i] = mg[i] > 128 ? 1 : 0;
-      paperMask = erode(bin, mq.c.width, mq.c.height, Math.max(2, Math.round(TARGET_PITCH / 4 / 4)));
+      mq.ctx.fillRect(0, 0, qw, qh);
+      place(mq.ctx, qw / w, mc.c, crop.x0 * small, crop.y0 * small, cw * small, ch * small);
+      const mg = grayOf(mq.ctx, qw, qh);
+      const coarse = new Uint8Array(mg.length);
+      for (let i = 0; i < mg.length; i++) coarse[i] = mg[i] > 128 ? 1 : 0;
+
+      // Seguro papel / seguro mesa, y en la franja del medio decide el brillo
+      const band = Math.max(3, Math.round(qw / 60));
+      const inner = erode(coarse, qw, qh, band);
+      const outer = localMax(coarse, qw, qh, band);
+      const inVals: number[] = [], outVals: number[] = [];
+      for (let i = 0; i < lm.length; i += 3) {
+        if (inner[i]) inVals.push(lm[i]);
+        else if (!outer[i]) outVals.push(lm[i]);
+      }
+      const t = (median(inVals) + median(outVals)) / 2;
+      const raw = new Uint8Array(lm.length);
+      for (let i = 0; i < lm.length; i++) raw[i] = inner[i] || (outer[i] && lm[i] > t) ? 1 : 0;
+      // El máximo local agranda el papel r px hacia la mesa: se devuelven
+      paperMask = erode(raw, qw, qh, r);
     }
-    q.ctx.drawImage(o.c, 0, 0, q.c.width, q.c.height);
-    const qg = grayOf(q.ctx, q.c.width, q.c.height);
-    const r = Math.max(2, Math.round(TARGET_PITCH / 4 / 3));
-    const bgSmall = boxMean(localMax(qg, q.c.width, q.c.height, r), q.c.width, q.c.height, r);
+    const bgSmall = boxMean(lm, qw, qh, r);
     const bgImg = q.ctx.createImageData(q.c.width, q.c.height);
     for (let i = 0; i < bgSmall.length; i++) {
       bgImg.data[i * 4] = bgImg.data[i * 4 + 1] = bgImg.data[i * 4 + 2] = bgSmall[i];
@@ -313,7 +337,6 @@ export async function prepareReceiptImage(source: File | string): Promise<Prepar
     const b = canvas(w, h);
     b.ctx.drawImage(q.c, 0, 0, w, h);
     const bg = grayOf(b.ctx, w, h);
-    const qw = q.c.width, qh = q.c.height;
 
     const out = o.ctx.getImageData(0, 0, w, h);
     for (let i = 0; i < gray.length; i++) {
