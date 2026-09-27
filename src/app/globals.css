@@ -30,3 +30,12 @@ body {
   --color-card: var(--card);
   --color-muted: var(--muted);
 }
+
+/* Línea que recorre la boleta mientras se lee */
+@keyframes scan-line {
+  0%   { top: -2rem; }
+  100% { top: 100%; }
+}
+.scan-line {
+  animation: scan-line 1.6s ease-in-out infinite alternate;
+}

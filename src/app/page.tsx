@@ -41,11 +41,13 @@ export default function Home() {
           items={state.items}
           people={state.people}
           currency={state.currency}
+          tip={state.tip}
           onAdd={addItem}
           onUpdate={updateItem}
           onRemove={removeItem}
           onTogglePerson={togglePersonOnItem}
           onAddScanned={addScannedItems}
+          onTipChange={setTip}
         />
         <TipSelector
           tip={state.tip}

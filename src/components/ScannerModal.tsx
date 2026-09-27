@@ -1,69 +1,88 @@
 'use client';
-import { useState, useRef } from 'react';
-import type { ScannedItem } from '@/types';
-import { parseReceiptText, preprocessImage } from '@/lib/receiptParser';
+import { useState, useRef, useEffect } from 'react';
+import type { ParsedReceipt, ScannedItem } from '@/types';
+import { parseReceipt, linesFromBlocks } from '@/lib/receiptParser';
+import { prepareReceiptImage, type PreparedImage } from '@/lib/receiptImage';
 import CropTool from './CropTool';
+import ReceiptReview from './ReceiptReview';
 
 interface Props {
+  currency: string;
+  tip: number;
   onScan: (items: ScannedItem[]) => void;
+  onTipChange: (tip: number) => void;
   onClose: () => void;
 }
 
 type Step = 'upload' | 'crop' | 'scanning' | 'review';
 
-export default function ScannerModal({ onScan, onClose }: Props) {
+async function asPrepared(src: string): Promise<PreparedImage> {
+  // Si el preprocesamiento falla, se usa la foto tal cual
+  try {
+    return await prepareReceiptImage(src);
+  } catch (e) {
+    console.error(e);
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    return { dataUrl: src, width: img.naturalWidth, height: img.naturalHeight, angle: 0, cropped: false };
+  }
+}
+
+export default function ScannerModal({ currency, tip, onScan, onTipChange, onClose }: Props) {
   const [step, setStep] = useState<Step>('upload');
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<PreparedImage | null>(null);
+  const [receipt, setReceipt] = useState<ParsedReceipt | null>(null);
   const [progress, setProgress] = useState(0);
-  const [scanned, setScanned] = useState<ScannedItem[]>([]);
+  const [stage, setStage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  // 1. Usuario elige archivo → mostrar herramienta de crop
-  const handleFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    setStep('crop');
-  };
+  useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
 
-  // 2. Con imagen recortada (o completa) → correr Tesseract
-  const runOCR = async (imageSource: string) => {
+  // Recortar, enderezar y limpiar la foto → Tesseract → ordenar los datos
+  const runScan = async (source: string) => {
     setStep('scanning');
-    setProgress(10);
     setError(null);
+    setPrepared(null);
+    setProgress(5);
+    setStage('Buscando la boleta en la foto…');
 
     try {
-      const processed = await preprocessImage(imageSource);
-      setProgress(30);
+      const prep = await asPrepared(source);
+      setPrepared(prep);
+      setProgress(20);
+      setStage('Preparando el lector…');
 
-      const { createWorker } = await import('tesseract.js');
+      const { createWorker, PSM } = await import('tesseract.js');
       const worker = await createWorker('spa+eng', 1, {
-        logger: (m: { status: string; progress: number }) => {
+        logger: (m) => {
           if (m.status === 'recognizing text') {
-            setProgress(30 + Math.round(m.progress * 60));
+            setStage('Leyendo el texto…');
+            setProgress(25 + Math.round(m.progress * 70));
           }
         },
       });
-
-      // PSM 4 = columna única de texto (ideal para boletas)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (worker as any).setParameters({
-        tessedit_pageseg_mode: '4',
-        preserve_interword_spaces: '1',
-      });
-
-      const { data: { text } } = await worker.recognize(processed);
-      await worker.terminate();
-      setProgress(95);
-
-      const items = parseReceiptText(text);
-      setScanned(items);
-      setProgress(100);
-      setStep('review');
-
-      if (items.length === 0) {
-        setError('No se detectaron ítems. Puedes agregarlos manualmente abajo.');
+      try {
+        // PSM 4 = una columna de texto de tamaño variable (así son las boletas)
+        await worker.setParameters({
+          tessedit_pageseg_mode: PSM.SINGLE_COLUMN,
+          preserve_interword_spaces: '1',
+          user_defined_dpi: '300',
+        });
+        const { data } = await worker.recognize(prep.dataUrl, {}, { text: true, blocks: true });
+        setStage('Ordenando los datos…');
+        const parsed = parseReceipt(linesFromBlocks(data.blocks));
+        setReceipt(parsed);
+        setProgress(100);
+        setStep('review');
+        if (parsed.items.length === 0) {
+          setError('No se detectaron ítems. Toca las líneas descartadas en la foto o agrégalos a mano.');
+        }
+      } finally {
+        await worker.terminate();
       }
     } catch (e) {
       console.error(e);
@@ -72,26 +91,24 @@ export default function ScannerModal({ onScan, onClose }: Props) {
     }
   };
 
-  const updateItem = (i: number, patch: Partial<ScannedItem>) =>
-    setScanned((prev) => prev.map((item, idx) => (idx === i ? { ...item, ...patch } : item)));
+  // Elegir foto → procesar directo (el recorte a mano queda como plan B)
+  const handleFile = (file: File) => {
+    const url = URL.createObjectURL(file);
+    setPhotoUrl(url);
+    runScan(url);
+  };
 
-  const removeItem = (i: number) =>
-    setScanned((prev) => prev.filter((_, idx) => idx !== i));
-
-  const addManualItem = () =>
-    setScanned((prev) => [...prev, { name: '', price: 0 }]);
-
-  const validItems = scanned.filter((i) => i.name.trim() && i.price > 0);
-
-  const handleConfirm = () => {
-    onScan(validItems);
+  const handleConfirm = (items: ScannedItem[], tipPercent?: number) => {
+    onScan(items);
+    if (tipPercent !== undefined) onTipChange(tipPercent);
     onClose();
   };
 
   const reset = () => {
     setStep('upload');
-    setPreviewUrl(null);
-    setScanned([]);
+    setPhotoUrl(null);
+    setPrepared(null);
+    setReceipt(null);
     setError(null);
     setProgress(0);
   };
@@ -106,7 +123,7 @@ export default function ScannerModal({ onScan, onClose }: Props) {
             {step === 'upload'   && 'Escanear boleta'}
             {step === 'crop'     && 'Selecciona la zona'}
             {step === 'scanning' && 'Analizando...'}
-            {step === 'review'   && 'Revisa los ítems'}
+            {step === 'review'   && 'Revisa la boleta'}
           </h2>
           <button onClick={onClose} className="text-[#8B7E74] hover:text-[#1A1410] p-1">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -121,6 +138,11 @@ export default function ScannerModal({ onScan, onClose }: Props) {
           {/* STEP: upload */}
           {step === 'upload' && (
             <>
+              {error && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3 py-2">
+                  {error}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 {/* Cámara */}
                 <button
@@ -144,7 +166,10 @@ export default function ScannerModal({ onScan, onClose }: Props) {
               </div>
 
               <p className="text-xs text-center text-[#8B7E74]">
-                100% local · sin internet · gratis
+                Se procesa en tu dispositivo · la foto no se sube a ningún lado
+              </p>
+              <p className="text-xs text-center text-[#8B7E74]">
+                Tip: boleta estirada, con buena luz y ocupando buena parte de la foto
               </p>
 
               {/* Input cámara — fuerza apertura de cámara */}
@@ -167,21 +192,28 @@ export default function ScannerModal({ onScan, onClose }: Props) {
             </>
           )}
 
-          {/* STEP: crop */}
-          {step === 'crop' && previewUrl && (
+          {/* STEP: crop (plan B si la detección automática falla) */}
+          {step === 'crop' && photoUrl && (
             <CropTool
-              imageUrl={previewUrl}
-              onCrop={(dataUrl) => runOCR(dataUrl)}
-              onSkip={() => runOCR(previewUrl)}
+              imageUrl={photoUrl}
+              onCrop={(dataUrl) => runScan(dataUrl)}
+              onSkip={() => runScan(photoUrl)}
             />
           )}
 
           {/* STEP: scanning */}
           {step === 'scanning' && (
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-2">
+              {prepared && (
+                <div className="relative mx-auto w-40 max-h-56 overflow-hidden rounded-lg border border-[#E8E2D9] bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={prepared.dataUrl} alt="" className="w-full block" />
+                  <div className="scan-line absolute inset-x-0 h-8 bg-gradient-to-b from-transparent via-[#C8956C]/40 to-transparent" />
+                </div>
+              )}
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-[#8B7E74]">Reconociendo texto...</span>
+                  <span className="text-[#8B7E74]">{stage}</span>
                   <span className="font-medium text-[#1A1410]">{progress}%</span>
                 </div>
                 <div className="w-full bg-[#E8E2D9] rounded-full h-2.5">
@@ -198,75 +230,25 @@ export default function ScannerModal({ onScan, onClose }: Props) {
           )}
 
           {/* STEP: review */}
-          {step === 'review' && (
-            <div className="space-y-3">
+          {step === 'review' && prepared && receipt && (
+            <>
               {error && (
                 <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3 py-2">
                   {error}
                 </div>
               )}
-
-              {scanned.length > 0 && !error && (
-                <p className="text-sm text-[#8B7E74]">
-                  {scanned.length} ítem{scanned.length !== 1 ? 's' : ''} detectados · edita si algo está mal
-                </p>
-              )}
-
-              <div className="space-y-2">
-                {scanned.map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-[#FAF7F2] rounded-xl px-3 py-2 border border-[#E8E2D9]">
-                    <input
-                      value={item.name}
-                      onChange={(e) => updateItem(i, { name: e.target.value })}
-                      className="flex-1 text-sm bg-transparent focus:outline-none min-w-0"
-                      placeholder="Nombre del ítem"
-                    />
-                    <span className="text-[#E8E2D9] flex-shrink-0">|</span>
-                    <input
-                      type="number"
-                      value={item.price || ''}
-                      onChange={(e) => updateItem(i, { price: parseFloat(e.target.value) || 0 })}
-                      className="w-24 text-sm text-right bg-transparent focus:outline-none font-medium flex-shrink-0"
-                      placeholder="Precio"
-                      min="0"
-                    />
-                    <button onClick={() => removeItem(i)} className="text-[#8B7E74] hover:text-red-500 transition-colors flex-shrink-0">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                onClick={addManualItem}
-                className="w-full text-sm text-[#C8956C] border border-dashed border-[#C8956C] rounded-xl py-2 hover:bg-[#FAF7F2] transition-colors"
-              >
-                + Agregar ítem manualmente
-              </button>
-            </div>
+              <ReceiptReview
+                image={prepared}
+                receipt={receipt}
+                currency={currency}
+                currentTip={tip}
+                onConfirm={handleConfirm}
+                onRetry={reset}
+                onManualCrop={() => setStep('crop')}
+              />
+            </>
           )}
         </div>
-
-        {/* Footer */}
-        {step === 'review' && (
-          <div className="p-4 border-t border-[#E8E2D9] shrink-0 space-y-2">
-            <button
-              onClick={handleConfirm}
-              disabled={validItems.length === 0}
-              className="w-full bg-[#1A1410] text-white rounded-xl py-3 font-medium hover:bg-[#2d2420] transition-colors disabled:opacity-40"
-            >
-              Agregar {validItems.length} ítem{validItems.length !== 1 ? 's' : ''} al ticket
-            </button>
-            <button
-              onClick={reset}
-              className="w-full text-sm text-[#8B7E74] hover:text-[#1A1410] py-1 transition-colors"
-            >
-              Escanear otra foto
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
