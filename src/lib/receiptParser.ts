@@ -36,6 +36,7 @@ function fixNumericToken(tok: string): string {
 function tokenize(line: string): string[] {
   const raw = line
     .replace(/[|¦"“”_]+/g, ' ')
+    .replace(/(\d)\s*([.,])\s*(\d{3})(?!\d)/g, '$1$2$3') // "5 .000", "23 . 900" → un monto
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
@@ -174,7 +175,9 @@ const RE = {
   subtotal: /\bsub\s*-?\s*tota[l1i]\b/,
   total: /\b(tota[l1i]|a pagar|monto)\b/,
   notTotal: /\b(monto|tota[l1i])\s+(neto|exento|afecto|iva)\b/, // "MONTO NETO" es impuesto
-  tipWord: /\b(propina|servicio|tip)\b/,
+  tipWord: /\b(propina|tip)\b|\bservicio\b(?!\s+(de|a)\b)/, // "servicio de restaurant" es consumo
+  // Línea resumen del consumo ("CONSUMO 45.980"): total si hay detalle, ítem si es lo único
+  summary: /\b(consumo|consumos|alimentacion)\b|\bservicio\s+de\s+(restaurant|restoran|alimentacion|comida)\b/,
   tax: /\b(iva|i\.v\.a|neto|exento|impuesto|impto)\b/,
   payment: /\b(efectivo|vuelto|cambio|tarjeta|debito|credito|redcompra|transferencia|pago|visa|mastercard|webpay|donacion|redondeo)\b/,
   discount: /\b(descuento|dcto|desc|rebaja|promocion|cupon|ahorro)\b/,
@@ -185,6 +188,9 @@ const RE = {
     '\\b(direccion|dir\\.|fono|telefono|tel\\.?|email|e-mail|www|http|sii|timbre|verifique|gracias|sucursal|comuna)\\b',
     '\\bcasa matriz\\b', '\\bres\\.?\\s*(ex\\.?\\s*)?(n[°º]?\\s*)?\\d', '\\bresolucion\\b',
     '\\b(av|avda|avenida|calle|pasaje)\\.?\\s', '@',
+    '\\bcliente\\b', '\\bsenor(es)?\\b', '\\bconsumidor final\\b', '\\b(copia|original)\\s+(cliente|emisor|tributaria)\\b',
+    '\\b(comensales|pax|cubiertos|turno)\\s*:?\\s*\\d', '\\bpersonas\\s*:\\s*\\d',
+    '\\b(orden|pedido|comanda|cuenta)\\s*(n[°ºo]\\.?|#|nro\\.?|:)\\s*\\d',
   ].join('|')),
   columns: /\b(cant|cantidad|descripcion|detalle|producto|articulo|p\.?\s?unit|unitario|precio|valor)\b/,
 };
@@ -250,6 +256,41 @@ function amountAfter(line: string, word: RegExp): number | undefined {
 
 const letters = (s: string) => (s.match(/\p{L}/gu) ?? []).length;
 
+/** Distancia de edición (Levenshtein); corta apenas supera `max`. */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * ¿Alguna palabra de la línea es `word` aunque le falte o cambie una letra?
+ * Cubre lo que se corta en el borde de la foto o lee mal el OCR: "otal",
+ * "TOTAI", "Tota1" → total; "ropina" → propina.
+ */
+const LOOKALIKE_EXCEPTIONS = new Set(['propio', 'propia', 'propios', 'propias']); // "receta propia"
+
+function looksLike(n: string, word: string, maxDist: number): boolean {
+  return (n.match(/[a-z]+/g) ?? []).some((w) =>
+    w.length >= 4 && !LOOKALIKE_EXCEPTIONS.has(w) && editDistance(w, word, maxDist) <= maxDist);
+}
+
+const isSubtotal = (n: string) => RE.subtotal.test(n) || looksLike(n, 'subtotal', 2);
+const isTotal = (n: string) =>
+  (RE.total.test(n) || looksLike(n, 'total', 1)) && !RE.notTotal.test(n) && !RE.columns.test(n);
+const isTip = (n: string) => RE.tipWord.test(n) || looksLike(n, 'propina', 2);
+const isSummary = (n: string) => RE.summary.test(n) || looksLike(n, 'consumo', 1);
+
 // ─── Parser principal ─────────────────────────────────────────────────────────
 
 const LOW_CONFIDENCE = 72;
@@ -261,6 +302,8 @@ export function parseReceipt(ocrLines: OcrLine[]): ParsedReceipt {
   let seenItem = false;
   let closed = false; // ya pasó el TOTAL: lo que venga no son ítems
   let pendingQty: { qty: number; unit: number; line: number } | null = null;
+  const summaries: number[] = []; // líneas "CONSUMO 45.980"
+  let summaryHeader = -1;         // "CONSUMO CLIENTE" sin monto (el monto puede venir abajo)
 
   const addItem = (name: string, price: number, qty: number, lineIdx: number[], consistent: boolean, altPrice?: number) => {
     const conf = Math.min(...lineIdx.map((i) => lines[i].confidence));
@@ -314,22 +357,22 @@ export function parseReceipt(ocrLines: OcrLine[]): ParsedReceipt {
     }
 
     // Totales, propina, impuestos, pagos
-    if (RE.subtotal.test(n)) {
+    if (isSubtotal(n)) {
       pl.kind = 'subtotal'; pl.amount = lastAmount(text);
       if (pl.amount !== undefined && meta.subtotal === undefined) meta.subtotal = pl.amount;
       closed = closed || seenItem;
       continue;
     }
-    if (RE.total.test(n) && !RE.notTotal.test(n) && !RE.columns.test(n)) {
+    if (isTotal(n)) {
       pl.kind = 'total'; pl.amount = lastAmount(text);
       if (pl.amount !== undefined) {
-        if (RE.tipWord.test(n)) meta.totalWithTip ??= pl.amount;
+        if (isTip(n)) meta.totalWithTip ??= pl.amount;
         else meta.total ??= pl.amount;
       }
       closed = closed || seenItem;
       continue;
     }
-    if (RE.tipWord.test(n)) {
+    if (isTip(n)) {
       pl.kind = 'tip'; pl.amount = lastAmount(text);
       const pct = n.match(/(\d{1,2})\s*%/);
       if (pct) meta.tipPercent ??= Number(pct[1]);
@@ -343,6 +386,14 @@ export function parseReceipt(ocrLines: OcrLine[]): ParsedReceipt {
       continue;
     }
     if (RE.payment.test(n)) { pl.kind = 'payment'; pl.amount = lastAmount(text); continue; }
+    if (isSummary(n)) {
+      const amount = lastAmount(text);
+      if (amount === undefined) { pl.kind = 'meta'; summaryHeader = idx; continue; }
+      pl.kind = 'subtotal'; pl.amount = amount;
+      summaries.push(idx);
+      closed = closed || seenItem;
+      continue;
+    }
 
     const parts = splitLine(text);
 
@@ -380,6 +431,14 @@ export function parseReceipt(ocrLines: OcrLine[]): ParsedReceipt {
       }
     }
 
+    // "CONSUMO CLIENTE" y en la línea siguiente solo el monto
+    if (parts.amount !== undefined && letters(parts.name) < 2 && summaryHeader === idx - 1) {
+      pl.kind = 'subtotal'; pl.amount = parts.amount;
+      summaries.push(idx);
+      closed = closed || seenItem;
+      continue;
+    }
+
     if (parts.amount !== undefined && !closed) {
       let name = parts.name;
       const lineIdx = [idx];
@@ -405,6 +464,41 @@ export function parseReceipt(ocrLines: OcrLine[]): ParsedReceipt {
 
     if (parts.amount !== undefined) { pl.amount = parts.amount; continue; } // queda 'ignored', se puede agregar a mano
     if (letters(text) >= 3) pl.kind = 'text';
+  }
+
+  const removeItem = (k: number) => {
+    items.splice(k, 1);
+    for (const l of lines) {
+      if (l.itemIndex === k) l.itemIndex = undefined;
+      else if (l.itemIndex !== undefined && l.itemIndex > k) l.itemIndex--;
+    }
+  };
+
+  // "CONSUMO 45.980": con detalle es el total; si es lo único, es el ítem a dividir
+  if (summaries.length && items.length === 0) {
+    const i = summaries[0];
+    lines[i].kind = 'item';
+    addItem(splitLine(lines[i].text).name || 'Consumo', lines[i].amount!, 1, [i], true);
+  } else {
+    for (const i of summaries) {
+      const a = lines[i].amount!;
+      if (meta.total === undefined) meta.total = a;
+      else if (Math.abs(a - meta.total) >= 0.5) meta.subtotal ??= a;
+    }
+  }
+
+  // Un "ítem" de nombre corto que vale justo la suma de los anteriores es un
+  // total al que se le cortó o deformó la palabra ("otal 45.980", "TCTAL").
+  let running = 0;
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
+    if (k >= 2 && it.price > 0 && letters(it.name) <= 6 && Math.abs(it.price - running) < 0.5) {
+      for (const li of it.lines) { lines[li].kind = 'total'; lines[li].amount = it.price; }
+      meta.total ??= it.price;
+      removeItem(k);
+      break;
+    }
+    running += it.price;
   }
 
   // Comercio: primera línea con texto "de nombre" antes del primer ítem
@@ -464,19 +558,47 @@ export function checkTotals(items: Pick<ScannedItem, 'price'>[], meta: ReceiptMe
 interface TessLine { text: string; confidence: number; bbox: Bbox }
 interface TessBlock { paragraphs: { lines: TessLine[] }[] }
 
-/** Aplana blocks → paragraphs → lines de Tesseract.js en orden de lectura. */
+/**
+ * Aplana blocks → paragraphs → lines de Tesseract.js en orden de lectura y
+ * vuelve a unir los pedazos de una misma fila: a veces Tesseract corta la
+ * boleta en columnas ("Cazuela de Vacuno 6." | "900") y el precio queda suelto.
+ */
 export function linesFromBlocks(blocks: TessBlock[] | null | undefined): OcrLine[] {
   if (!blocks) return [];
-  const out: OcrLine[] = [];
+  const parts: (OcrLine & { bbox: Bbox })[] = [];
   for (const b of blocks) for (const p of b.paragraphs) for (const l of p.lines) {
     const text = l.text.replace(/\n/g, ' ').trim();
-    if (text) out.push({ text, confidence: l.confidence, bbox: l.bbox });
+    if (text) parts.push({ text, confidence: l.confidence, bbox: l.bbox });
   }
-  // De arriba hacia abajo (Tesseract a veces devuelve columnas por separado)
-  return out.sort((a, b) => {
-    const ay = (a.bbox!.y0 + a.bbox!.y1) / 2;
-    const by = (b.bbox!.y0 + b.bbox!.y1) / 2;
-    const h = Math.min(a.bbox!.y1 - a.bbox!.y0, b.bbox!.y1 - b.bbox!.y0);
-    return Math.abs(ay - by) < h * 0.5 ? a.bbox!.x0 - b.bbox!.x0 : ay - by;
+  parts.sort((a, b) => (a.bbox.y0 + a.bbox.y1) - (b.bbox.y0 + b.bbox.y1));
+
+  const rows: (typeof parts)[] = [];
+  for (const p of parts) {
+    const row = rows[rows.length - 1];
+    const last = row?.[row.length - 1];
+    const overlap = last ? Math.min(last.bbox.y1, p.bbox.y1) - Math.max(last.bbox.y0, p.bbox.y0) : 0;
+    const minH = last ? Math.min(last.bbox.y1 - last.bbox.y0, p.bbox.y1 - p.bbox.y0) : 0;
+    if (row && overlap > minH * 0.5) row.push(p);
+    else rows.push([p]);
+  }
+
+  return rows.map((row) => {
+    row.sort((a, b) => a.bbox.x0 - b.bbox.x0);
+    // Pegados (menos de ~1/3 de la altura de letra entre uno y otro) son el
+    // mismo número partido: "CONSUMO 2" + "3.900" → "CONSUMO 23.900"
+    let text = row[0].text;
+    for (let k = 1; k < row.length; k++) {
+      const gap = row[k].bbox.x0 - row[k - 1].bbox.x1;
+      const h = Math.min(row[k].bbox.y1 - row[k].bbox.y0, row[k - 1].bbox.y1 - row[k - 1].bbox.y0);
+      text += (gap < h * 0.3 ? '' : ' ') + row[k].text;
+    }
+    return {
+      text,
+      confidence: Math.min(...row.map((p) => p.confidence)),
+      bbox: {
+        x0: Math.min(...row.map((p) => p.bbox.x0)), y0: Math.min(...row.map((p) => p.bbox.y0)),
+        x1: Math.max(...row.map((p) => p.bbox.x1)), y1: Math.max(...row.map((p) => p.bbox.y1)),
+      },
+    };
   });
 }

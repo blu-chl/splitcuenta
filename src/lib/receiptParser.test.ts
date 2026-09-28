@@ -1,7 +1,7 @@
 // Tests del parser de boletas: npm test (usa node:test, sin dependencias).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReceipt, parseAmount } from './receiptParser.ts';
+import { parseReceipt, parseAmount, linesFromBlocks } from './receiptParser.ts';
 
 const parse = (text: string) =>
   parseReceipt(text.split('\n').map((t) => ({ text: t, confidence: 90 })));
@@ -111,6 +111,8 @@ Chorrillana
     [1, 'Pizza Olivas', 10900],         // monto partido en dos
     [1, 'Chorrillana', 16900],          // precio en la línea siguiente
   ]);
+  assert.deepEqual(items(`2 Empanada de Pino 5 .000
+1 Pastel de Choclo 7 . 500`), [[2, 'Empanada de Pino', 5000], [1, 'Pastel de Choclo', 7500]]);
 });
 
 test('lo que viene después del total no son ítems', () => {
@@ -153,4 +155,94 @@ test('no cuadra → avisa la diferencia exacta', () => {
 TOTAL 5.990`);
   assert.equal(r.check.status, 'mismatch');
   assert.equal(r.check.diff, -6);
+});
+
+test('TOTAL cortado o mal leído no se cuela como ítem', () => {
+  for (const word of ['otal', 'OTAL', 'Tota1', 'TOTAI', 'T0TAL', 'ubtotal']) {
+    const r = parse(`1 Lomo a lo Pobre 14.500
+1 Pisco Sour 5.990
+1 Bebida 2.500
+${word} 22.990
+ropina sugerida 10% 2.299`);
+    assert.equal(r.items.length, 3, word);
+    assert.equal(r.meta.total ?? r.meta.subtotal, 22990, word);
+    assert.equal(r.meta.tipPercent, 10, word);
+    assert.equal(r.check.status, 'ok', word);
+  }
+  // Irreconocible, pero vale justo la suma de lo anterior → es el total
+  const r = parse(`1 Lomo a lo Pobre 14.500
+1 Pisco Sour 5.990
+1 Bebida 2.500
+TCTAI 22.990`);
+  assert.equal(r.items.length, 3);
+  assert.equal(r.meta.total, 22990);
+  assert.equal(r.lines[3].kind, 'total');
+});
+
+test('CONSUMO CLIENTE es encabezado; CONSUMO con monto es el total', () => {
+  const r = parse(`CONSUMO CLIENTE
+2 Pisco Sour 11.980
+1 Tabla de Quesos 12.900
+CONSUMO 24.880`);
+  assert.deepEqual(r.items.map((i) => i.name), ['Pisco Sour', 'Tabla de Quesos']);
+  assert.equal(r.meta.total, 24880);
+  assert.equal(r.check.status, 'ok');
+
+  // Monto en la línea de abajo
+  const r2 = parse(`1 Lomo 14.500
+1 Bebida 2.500
+Consumo cliente
+17.000`);
+  assert.equal(r2.items.length, 2);
+  assert.equal(r2.meta.total, 17000);
+});
+
+test('boleta sin detalle: CONSUMO queda como único ítem para dividir', () => {
+  const r = parse(`RESTAURANT EL FOGON SPA
+BOLETA ELECTRONICA N° 555
+CONSUMO 45.980
+PROPINA SUGERIDA 10% 4.598
+TOTAL 50.578`);
+  assert.deepEqual(r.items.map((i) => [i.name, i.price]), [['CONSUMO', 45980]]);
+  assert.equal(r.check.status, 'ok'); // total − propina
+  assert.equal(parse('SERVICIO DE RESTAURANT 30.000').items[0].price, 30000);
+  assert.equal(parse('1 Lomo 14.500\nServicio 10% 1.450').meta.tip, 1450);
+});
+
+test('platos con palabras parecidas a encabezados siguen siendo ítems', () => {
+  assert.deepEqual(items(`1 Orden Papas Fritas 4.500
+1 Tabla para 2 personas 18.900
+1 Hamburguesa Original 7.990
+1 Pollo al Cilantro 8.900
+1 Pan de receta propia 2.500`).map((i) => i[1]), [
+    'Orden Papas Fritas', 'Tabla para 2 personas', 'Hamburguesa Original', 'Pollo al Cilantro', 'Pan de receta propia',
+  ]);
+});
+
+test('pedazos de una misma fila se vuelven a unir (Tesseract partió en columnas)', () => {
+  const line = (text: string, x0: number, y0: number, x1: number, y1: number) =>
+    ({ text, confidence: 90, bbox: { x0, y0, x1, y1 } });
+  const blocks = [
+    { paragraphs: [{ lines: [
+      line('1 Cazuela de Vacuno 6.', 10, 100, 600, 130),
+      line('1 Pastel de Choclo 7.', 10, 160, 600, 190),
+      line('TOTAL 14.', 10, 220, 600, 250),
+    ] }] },
+    { paragraphs: [{ lines: [
+      line('900', 620, 102, 700, 131),
+      line('500', 620, 161, 700, 191),
+      line('400', 620, 221, 700, 251),
+    ] }] },
+  ];
+  const r = parseReceipt(linesFromBlocks(blocks));
+  assert.deepEqual(r.items.map((i) => [i.name, i.price]), [['Cazuela de Vacuno', 6900], ['Pastel de Choclo', 7500]]);
+  assert.equal(r.meta.total, 14400);
+  assert.equal(r.check.status, 'ok');
+
+  // Cortado justo entre dos dígitos: pegados, no "cantidad 2 × 3.900"
+  const tight = linesFromBlocks([
+    { paragraphs: [{ lines: [line('CONSUMO 2', 10, 100, 600, 130)] }] },
+    { paragraphs: [{ lines: [line('3.900', 604, 101, 700, 131)] }] },
+  ]);
+  assert.equal(tight[0].text, 'CONSUMO 23.900');
 });
