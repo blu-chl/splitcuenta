@@ -3,6 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'SplitCuenta — Dividí la cuenta fácil',
+  icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo.png` },
   description: 'Dividí la cuenta del restaurante entre amigos. Escaneá el ticket o ingresá los ítems manualmente.',
 };
 

@@ -2,6 +2,7 @@
 import type { SplitState } from '@/types';
 import { encodeState } from '@/lib/calculations';
 import { useState } from 'react';
+import Image from 'next/image';
 
 interface Props {
   state: SplitState;
@@ -20,9 +21,15 @@ export default function Header({ state }: Props) {
 
   return (
     <header className="sticky top-0 z-50 bg-[#1A1410] text-white px-4 py-3 flex items-center justify-between shadow-lg">
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">🍽️</span>
-        <span className="font-heading text-xl tracking-tight">SplitCuenta</span>
+      <div className="flex items-center">
+        <Image
+          src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo-white.png`}
+          alt="Split"
+          width={569}
+          height={473}
+          priority
+          className="h-10 w-auto"
+        />
       </div>
       <button
         onClick={handleShare}
