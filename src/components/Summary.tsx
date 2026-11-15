@@ -16,7 +16,7 @@ export default function Summary({ state }: Props) {
 
   if (state.people.length === 0 || state.items.length === 0) {
     return (
-      <SectionCard step={4} title="Resumen" delay={180}>
+      <SectionCard title="Resumen" delay={180}>
         <p className="text-[#8B7E74] text-sm text-center py-4">
           Agrega personas e ítems para ver cuánto paga cada uno
         </p>
@@ -26,7 +26,6 @@ export default function Summary({ state }: Props) {
 
   return (
     <SectionCard
-      step={4}
       title="Resumen"
       delay={180}
       action={

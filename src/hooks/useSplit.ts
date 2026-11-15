@@ -6,7 +6,7 @@ import { PERSON_COLORS, generateId } from '@/lib/calculations';
 const defaultState: SplitState = {
   people: [],
   items: [],
-  tip: 20,        // Chile: 20% por defecto
+  tip: 10,        // Chile: 10% por defecto
   currency: 'CLP', // Moneda chilena por defecto
 };
 
@@ -18,6 +18,32 @@ export function useSplit(initial?: SplitState) {
       const color = PERSON_COLORS[s.people.length % PERSON_COLORS.length];
       const person: Person = { id: generateId(), name: '', color };
       return { ...s, people: [...s.people, person] };
+    });
+  }, []);
+
+  // Ajusta la cantidad de personas agregando o quitando desde el final
+  const setPeopleCount = useCallback((n: number) => {
+    setState((s) => {
+      const count = Math.max(2, Math.min(20, n));
+      if (count === s.people.length) return s;
+      if (count > s.people.length) {
+        const extra: Person[] = Array.from({ length: count - s.people.length }, (_, i) => ({
+          id: generateId(),
+          name: '',
+          color: PERSON_COLORS[(s.people.length + i) % PERSON_COLORS.length],
+        }));
+        return { ...s, people: [...s.people, ...extra] };
+      }
+      const kept = s.people.slice(0, count);
+      const keptIds = new Set(kept.map((p) => p.id));
+      return {
+        ...s,
+        people: kept,
+        items: s.items.map((item) => ({
+          ...item,
+          assignedTo: item.assignedTo.filter((id) => keptIds.has(id)),
+        })),
+      };
     });
   }, []);
 
@@ -100,7 +126,7 @@ export function useSplit(initial?: SplitState) {
 
   return {
     state, setState,
-    addPerson, updatePerson, removePerson,
+    addPerson, setPeopleCount, updatePerson, removePerson,
     addItem, updateItem, removeItem,
     togglePersonOnItem, addScannedItems,
     setTip, setCurrency, reset,

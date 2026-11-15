@@ -44,7 +44,7 @@ export default function TipSelector({ tip, currency, onTipChange, onCurrencyChan
     }`;
 
   return (
-    <SectionCard step={3} title="Propina y moneda" delay={120}>
+    <SectionCard title="Propina y moneda" delay={120}>
       <div className="space-y-5">
         {/* Propina */}
         <div>
@@ -58,7 +58,7 @@ export default function TipSelector({ tip, currency, onTipChange, onCurrencyChan
                 className={pill(!customMode && tip === p, 'bg-[#1A1410]')}
               >
                 {p === 0 ? 'Sin propina' : `${p}%`}
-                {p === 20 &&<span className="ml-1 text-xs opacity-60">(CL)</span>}
+                {p === 10 && <span className="ml-1 text-xs opacity-60">(CL)</span>}
               </button>
             ))}
             <button

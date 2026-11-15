@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 interface Props {
-  step: number;
+  step?: number;
   title: string;
   hint?: string;
   action?: ReactNode;
@@ -16,9 +16,11 @@ export default function SectionCard({ step, title, hint, action, children, delay
       style={{ animationDelay: `${delay}ms` }}
     >
       <div className="flex items-center gap-3 mb-4">
-        <span className="font-heading w-8 h-8 shrink-0 rounded-full bg-[#1A1410] text-[#FAF7F2] flex items-center justify-center text-base leading-none">
-          {step}
-        </span>
+        {step !== undefined && (
+          <span className="font-heading w-8 h-8 shrink-0 rounded-full bg-[#1A1410] text-[#FAF7F2] flex items-center justify-center text-base leading-none">
+            {step}
+          </span>
+        )}
         <div className="flex-1 min-w-0">
           <h2 className="font-heading text-xl leading-tight text-[#1A1410]">{title}</h2>
           {hint && <p className="text-xs text-[#8B7E74] mt-0.5">{hint}</p>}

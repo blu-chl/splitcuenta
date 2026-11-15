@@ -24,8 +24,7 @@ export default function ItemsList({
 
   return (
     <SectionCard
-      step={2}
-      title="¿Qué consumieron?"
+      title="Asigna los gastos"
       hint={
         items.length === 0
           ? undefined
