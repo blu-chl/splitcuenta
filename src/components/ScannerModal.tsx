@@ -169,22 +169,25 @@ export default function ScannerModal({ onScan, onClose }: Props) {
                   </button>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-3">
                   <button
                     onClick={() => cameraRef.current?.click()}
-                    className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
+                    className="w-full flex items-center justify-center gap-3 bg-[#C8956C] hover:bg-[#b07a54] active:scale-[0.98] text-white rounded-2xl py-5 shadow-md transition-all"
                   >
-                    <span className="text-4xl">📷</span>
-                    <span className="font-medium text-sm text-[#1A1410]">Tomar foto</span>
-                    <span className="text-xs text-[#8B7E74]">Usar cámara</span>
+                    <span className="text-3xl">📸</span>
+                    <span className="text-lg font-semibold">Toma la foto</span>
                   </button>
+                  <div className="flex items-center gap-3 text-xs text-[#8B7E74]">
+                    <span className="flex-1 h-px bg-[#E8E2D9]" />
+                    o
+                    <span className="flex-1 h-px bg-[#E8E2D9]" />
+                  </div>
                   <button
                     onClick={() => galleryRef.current?.click()}
-                    className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
+                    className="w-full flex items-center justify-center gap-3 bg-white border-2 border-[#1A1410] text-[#1A1410] hover:bg-[#FAF7F2] active:scale-[0.98] rounded-2xl py-4 transition-all"
                   >
-                    <span className="text-4xl">🖼️</span>
-                    <span className="font-medium text-sm text-[#1A1410]">Elegir foto</span>
-                    <span className="text-xs text-[#8B7E74]">Desde galería</span>
+                    <span className="text-2xl">📁</span>
+                    <span className="text-base font-semibold">Subir foto</span>
                   </button>
                 </div>
 
