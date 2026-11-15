@@ -10,13 +10,17 @@ import EngineBadge from './EngineBadge';
 interface Props {
   onScan: (items: ScannedItem[]) => void;
   onClose: () => void;
+  /** Foto ya elegida en el paso inicial: salta directo al recorte */
+  initialFile?: File;
 }
 
 type Step = 'upload' | 'crop' | 'scanning' | 'review';
 
-export default function ScannerModal({ onScan, onClose }: Props) {
-  const [step, setStep] = useState<Step>('upload');
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+export default function ScannerModal({ onScan, onClose, initialFile }: Props) {
+  const [step, setStep] = useState<Step>(initialFile ? 'crop' : 'upload');
+  const [previewUrl, setPreviewUrl] = useState<string | null>(
+    () => (initialFile ? URL.createObjectURL(initialFile) : null),
+  );
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [scanned, setScanned] = useState<ScannedItem[]>([]);
