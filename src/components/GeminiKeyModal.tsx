@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { getGeminiKey, saveGeminiKey, clearGeminiKey } from '@/lib/geminiOcr';
 
 interface Props {
@@ -8,15 +8,10 @@ interface Props {
 }
 
 export default function GeminiKeyModal({ onClose, onSaved }: Props) {
-  const [key, setKey] = useState('');
+  // Solo se monta al abrir el modal (cliente), así que leer localStorage acá es seguro
+  const [key, setKey] = useState(() => getGeminiKey());
   const [saved, setSaved] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
-
-  useEffect(() => {
-    const existing = getGeminiKey();
-    setHasKey(!!existing);
-    if (existing) setKey(existing);
-  }, []);
+  const [hasKey, setHasKey] = useState(() => !!getGeminiKey());
 
   const handleSave = () => {
     if (!key.trim()) return;
@@ -50,7 +45,7 @@ export default function GeminiKeyModal({ onClose, onSaved }: Props) {
           <ol className="text-[#8B7E74] space-y-1 list-decimal list-inside">
             <li>Entra a <span className="text-[#C8956C] font-medium">aistudio.google.com</span></li>
             <li>Inicia sesión con tu cuenta Google</li>
-            <li>Clic en <strong>"Get API Key"</strong> → <strong>"Create API Key"</strong></li>
+            <li>Clic en <strong>&quot;Get API Key&quot;</strong> → <strong>&quot;Create API Key&quot;</strong></li>
             <li>Copia y pega la key aquí abajo</li>
           </ol>
           <p className="text-xs text-[#8B7E74] pt-1">

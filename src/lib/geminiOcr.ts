@@ -1,6 +1,6 @@
 import type { ScannedItem } from '@/types';
 
-const GEMINI_MODEL = 'gemini-2.0-flash-lite';
+export const GEMINI_MODEL = 'gemini-2.0-flash-lite';
 
 const PROMPT = `Eres un lector de boletas de restaurante. Extrae TODOS los ítems consumidos.
 

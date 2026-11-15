@@ -1,10 +1,11 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import type { ScannedItem } from '@/types';
 import { parseReceiptText, preprocessImage } from '@/lib/receiptParser';
 import { scanWithGemini, getGeminiKey } from '@/lib/geminiOcr';
 import CropTool from './CropTool';
 import GeminiKeyModal from './GeminiKeyModal';
+import EngineBadge from './EngineBadge';
 
 interface Props {
   onScan: (items: ScannedItem[]) => void;
@@ -21,14 +22,12 @@ export default function ScannerModal({ onScan, onClose }: Props) {
   const [scanned, setScanned] = useState<ScannedItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usedEngine, setUsedEngine] = useState<'gemini' | 'tesseract' | null>(null);
+  const [fellBack, setFellBack] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  // El modal solo se monta al hacer clic (cliente), así que leer localStorage acá es seguro
+  const [hasGeminiKey, setHasGeminiKey] = useState(() => !!getGeminiKey());
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setHasGeminiKey(!!getGeminiKey());
-  }, []);
 
   const handleFile = (file: File) => {
     setPreviewUrl(URL.createObjectURL(file));
@@ -42,6 +41,8 @@ export default function ScannerModal({ onScan, onClose }: Props) {
 
     try {
       const apiKey = getGeminiKey();
+      setFellBack(false);
+      setUsedEngine(apiKey ? 'gemini' : 'tesseract');
 
       // ── Intentar Gemini primero ───────────────────────────────────────────
       if (apiKey) {
@@ -59,7 +60,8 @@ export default function ScannerModal({ onScan, onClose }: Props) {
           return;
         } catch (geminiErr) {
           console.warn('Gemini falló, usando Tesseract:', geminiErr);
-          setError('Gemini falló, usando OCR local como respaldo...');
+          setFellBack(true);
+          setUsedEngine('tesseract');
         }
       }
 
@@ -117,6 +119,7 @@ export default function ScannerModal({ onScan, onClose }: Props) {
     setProgress(0);
     setProgressLabel('');
     setUsedEngine(null);
+    setFellBack(false);
   };
 
   return (
@@ -133,14 +136,6 @@ export default function ScannerModal({ onScan, onClose }: Props) {
               {step === 'review'   && 'Revisa los ítems'}
             </h2>
             <div className="flex items-center gap-2">
-              {/* Botón configurar Gemini */}
-              <button
-                onClick={() => setShowKeyModal(true)}
-                className="text-xs flex items-center gap-1 px-2 py-1 rounded-full border border-[#E8E2D9] text-[#8B7E74] hover:border-[#C8956C] hover:text-[#C8956C] transition-colors"
-                title="Configurar Gemini AI"
-              >
-                {hasGeminiKey ? '✨ Gemini ON' : '⚙️ Configurar IA'}
-              </button>
               <button onClick={onClose} className="text-[#8B7E74] hover:text-[#1A1410] p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -155,19 +150,27 @@ export default function ScannerModal({ onScan, onClose }: Props) {
             {/* STEP: upload */}
             {step === 'upload' && (
               <>
-                {/* Banner si no tiene Gemini */}
-                {!hasGeminiKey && (
-                  <button
-                    onClick={() => setShowKeyModal(true)}
-                    className="w-full flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-left hover:bg-amber-100 transition-colors"
-                  >
-                    <span className="text-xl">✨</span>
-                    <div>
-                      <p className="text-sm font-medium text-amber-900">Activa Gemini AI para mejor lectura</p>
-                      <p className="text-xs text-amber-700">Gratis con cuenta Google · toca para configurar</p>
-                    </div>
-                  </button>
+                {error && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3 py-2">
+                    {error}
+                  </div>
                 )}
+
+                {/* Motor de lectura que se va a usar */}
+                <div>
+                  <p className="text-[11px] font-semibold text-[#8B7E74] mb-1.5 uppercase tracking-widest">
+                    Se leerá con
+                  </p>
+                  <div className="flex items-stretch gap-2">
+                    <EngineBadge engine={hasGeminiKey ? 'gemini' : 'tesseract'} className="flex-1" />
+                    <button
+                      onClick={() => setShowKeyModal(true)}
+                      className="shrink-0 text-xs font-medium px-3 rounded-xl border border-[#E8E2D9] text-[#8B7E74] hover:border-[#C8956C] hover:text-[#C8956C] transition-colors"
+                    >
+                      {hasGeminiKey ? 'Cambiar' : '✨ Activar IA'}
+                    </button>
+                  </div>
+                </div>
 
                 <div className="space-y-3">
                   <button
@@ -219,9 +222,9 @@ export default function ScannerModal({ onScan, onClose }: Props) {
                     <div className="bg-[#C8956C] h-2.5 rounded-full transition-all duration-300"
                       style={{ width: `${progress}%` }} />
                   </div>
-                  <p className="text-xs text-[#8B7E74] text-center pt-1">
-                    {hasGeminiKey ? '✨ Gemini AI · via Google' : 'Tesseract.js · procesando en tu dispositivo'}
-                  </p>
+                  {usedEngine && (
+                    <EngineBadge engine={usedEngine} fellBack={fellBack} className="mt-2" />
+                  )}
                 </div>
               </div>
             )}
@@ -230,11 +233,7 @@ export default function ScannerModal({ onScan, onClose }: Props) {
             {step === 'review' && (
               <div className="space-y-3">
                 {/* Badge del motor usado */}
-                {usedEngine && (
-                  <div className="flex items-center gap-1.5 text-xs text-[#8B7E74]">
-                    <span>{usedEngine === 'gemini' ? '✨ Analizado con Gemini AI' : '🔤 Analizado con Tesseract OCR'}</span>
-                  </div>
-                )}
+                {usedEngine && <EngineBadge engine={usedEngine} fellBack={fellBack} />}
 
                 {error && (
                   <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3 py-2">

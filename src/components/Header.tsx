@@ -20,7 +20,7 @@ export default function Header({ state }: Props) {
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-[#1A1410] text-white px-4 py-3 flex items-center justify-between shadow-lg">
+    <header className="sticky top-0 z-50 bg-[#1A1410] text-white px-4 py-2.5 flex items-center justify-between border-b border-[#C8956C]/40 shadow-[0_8px_24px_-12px_rgba(26,20,16,0.5)]">
       <div className="flex items-center">
         <Image
           src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo-white.png`}
