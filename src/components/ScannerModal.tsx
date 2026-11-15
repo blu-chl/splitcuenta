@@ -1,8 +1,10 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { ScannedItem } from '@/types';
 import { parseReceiptText, preprocessImage } from '@/lib/receiptParser';
+import { scanWithGemini, getGeminiKey } from '@/lib/geminiOcr';
 import CropTool from './CropTool';
+import GeminiKeyModal from './GeminiKeyModal';
 
 interface Props {
   onScan: (items: ScannedItem[]) => void;
@@ -15,28 +17,59 @@ export default function ScannerModal({ onScan, onClose }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
   const [scanned, setScanned] = useState<ScannedItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [usedEngine, setUsedEngine] = useState<'gemini' | 'tesseract' | null>(null);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  // 1. Usuario elige archivo → mostrar herramienta de crop
+  useEffect(() => {
+    setHasGeminiKey(!!getGeminiKey());
+  }, []);
+
   const handleFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
+    setPreviewUrl(URL.createObjectURL(file));
     setStep('crop');
   };
 
-  // 2. Con imagen recortada (o completa) → correr Tesseract
   const runOCR = async (imageSource: string) => {
     setStep('scanning');
-    setProgress(10);
+    setProgress(5);
     setError(null);
 
     try {
+      const apiKey = getGeminiKey();
+
+      // ── Intentar Gemini primero ───────────────────────────────────────────
+      if (apiKey) {
+        setProgressLabel('Analizando con Gemini AI...');
+        setProgress(20);
+        try {
+          const items = await scanWithGemini(imageSource, apiKey);
+          setScanned(items);
+          setUsedEngine('gemini');
+          setProgress(100);
+          setStep('review');
+          if (items.length === 0) {
+            setError('Gemini no encontró ítems. Puedes agregarlos manualmente.');
+          }
+          return;
+        } catch (geminiErr) {
+          console.warn('Gemini falló, usando Tesseract:', geminiErr);
+          setError('Gemini falló, usando OCR local como respaldo...');
+        }
+      }
+
+      // ── Fallback: Tesseract ───────────────────────────────────────────────
+      setProgressLabel('Preprocesando imagen...');
+      setProgress(15);
       const processed = await preprocessImage(imageSource);
       setProgress(30);
 
+      setProgressLabel('Reconociendo texto...');
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('spa+eng', 1, {
         logger: (m: { status: string; progress: number }) => {
@@ -45,25 +78,21 @@ export default function ScannerModal({ onScan, onClose }: Props) {
           }
         },
       });
-
-      // PSM 4 = columna única de texto (ideal para boletas)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (worker as any).setParameters({
         tessedit_pageseg_mode: '4',
         preserve_interword_spaces: '1',
       });
-
       const { data: { text } } = await worker.recognize(processed);
       await worker.terminate();
-      setProgress(95);
 
       const items = parseReceiptText(text);
       setScanned(items);
+      setUsedEngine('tesseract');
       setProgress(100);
       setStep('review');
-
       if (items.length === 0) {
-        setError('No se detectaron ítems. Puedes agregarlos manualmente abajo.');
+        setError('No se detectaron ítems. Puedes agregarlos manualmente.');
       }
     } catch (e) {
       console.error(e);
@@ -78,15 +107,7 @@ export default function ScannerModal({ onScan, onClose }: Props) {
   const removeItem = (i: number) =>
     setScanned((prev) => prev.filter((_, idx) => idx !== i));
 
-  const addManualItem = () =>
-    setScanned((prev) => [...prev, { name: '', price: 0 }]);
-
   const validItems = scanned.filter((i) => i.name.trim() && i.price > 0);
-
-  const handleConfirm = () => {
-    onScan(validItems);
-    onClose();
-  };
 
   const reset = () => {
     setStep('upload');
@@ -94,180 +115,197 @@ export default function ScannerModal({ onScan, onClose }: Props) {
     setScanned([]);
     setError(null);
     setProgress(0);
+    setProgressLabel('');
+    setUsedEngine(null);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[92vh] flex flex-col">
+    <>
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[92vh] flex flex-col">
 
-        {/* Header */}
-        <div className="p-4 border-b border-[#E8E2D9] flex items-center justify-between shrink-0">
-          <h2 className="font-heading text-lg">
-            {step === 'upload'   && 'Escanear boleta'}
-            {step === 'crop'     && 'Selecciona la zona'}
-            {step === 'scanning' && 'Analizando...'}
-            {step === 'review'   && 'Revisa los ítems'}
-          </h2>
-          <button onClick={onClose} className="text-[#8B7E74] hover:text-[#1A1410] p-1">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-
-          {/* STEP: upload */}
-          {step === 'upload' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                {/* Cámara */}
-                <button
-                  onClick={() => cameraRef.current?.click()}
-                  className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
-                >
-                  <span className="text-4xl">📷</span>
-                  <span className="font-medium text-sm text-[#1A1410]">Tomar foto</span>
-                  <span className="text-xs text-[#8B7E74]">Usar cámara</span>
-                </button>
-
-                {/* Galería */}
-                <button
-                  onClick={() => galleryRef.current?.click()}
-                  className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
-                >
-                  <span className="text-4xl">🖼️</span>
-                  <span className="font-medium text-sm text-[#1A1410]">Elegir foto</span>
-                  <span className="text-xs text-[#8B7E74]">Desde galería</span>
-                </button>
-              </div>
-
-              <p className="text-xs text-center text-[#8B7E74]">
-                100% local · sin internet · gratis
-              </p>
-
-              {/* Input cámara — fuerza apertura de cámara */}
-              <input
-                ref={cameraRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-              />
-              {/* Input galería — sin capture, abre el selector de archivos */}
-              <input
-                ref={galleryRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-              />
-            </>
-          )}
-
-          {/* STEP: crop */}
-          {step === 'crop' && previewUrl && (
-            <CropTool
-              imageUrl={previewUrl}
-              onCrop={(dataUrl) => runOCR(dataUrl)}
-              onSkip={() => runOCR(previewUrl)}
-            />
-          )}
-
-          {/* STEP: scanning */}
-          {step === 'scanning' && (
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-[#8B7E74]">Reconociendo texto...</span>
-                  <span className="font-medium text-[#1A1410]">{progress}%</span>
-                </div>
-                <div className="w-full bg-[#E8E2D9] rounded-full h-2.5">
-                  <div
-                    className="bg-[#C8956C] h-2.5 rounded-full transition-all duration-200"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <p className="text-xs text-[#8B7E74] text-center pt-1">
-                  Tesseract.js · procesando en tu dispositivo
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* STEP: review */}
-          {step === 'review' && (
-            <div className="space-y-3">
-              {error && (
-                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3 py-2">
-                  {error}
-                </div>
-              )}
-
-              {scanned.length > 0 && !error && (
-                <p className="text-sm text-[#8B7E74]">
-                  {scanned.length} ítem{scanned.length !== 1 ? 's' : ''} detectados · edita si algo está mal
-                </p>
-              )}
-
-              <div className="space-y-2">
-                {scanned.map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-[#FAF7F2] rounded-xl px-3 py-2 border border-[#E8E2D9]">
-                    <input
-                      value={item.name}
-                      onChange={(e) => updateItem(i, { name: e.target.value })}
-                      className="flex-1 text-sm bg-transparent focus:outline-none min-w-0"
-                      placeholder="Nombre del ítem"
-                    />
-                    <span className="text-[#E8E2D9] flex-shrink-0">|</span>
-                    <input
-                      type="number"
-                      value={item.price || ''}
-                      onChange={(e) => updateItem(i, { price: parseFloat(e.target.value) || 0 })}
-                      className="w-24 text-sm text-right bg-transparent focus:outline-none font-medium flex-shrink-0"
-                      placeholder="Precio"
-                      min="0"
-                    />
-                    <button onClick={() => removeItem(i)} className="text-[#8B7E74] hover:text-red-500 transition-colors flex-shrink-0">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-
+          {/* Header */}
+          <div className="p-4 border-b border-[#E8E2D9] flex items-center justify-between shrink-0">
+            <h2 className="font-heading text-lg">
+              {step === 'upload'   && 'Escanear boleta'}
+              {step === 'crop'     && 'Selecciona la zona'}
+              {step === 'scanning' && 'Analizando...'}
+              {step === 'review'   && 'Revisa los ítems'}
+            </h2>
+            <div className="flex items-center gap-2">
+              {/* Botón configurar Gemini */}
               <button
-                onClick={addManualItem}
-                className="w-full text-sm text-[#C8956C] border border-dashed border-[#C8956C] rounded-xl py-2 hover:bg-[#FAF7F2] transition-colors"
+                onClick={() => setShowKeyModal(true)}
+                className="text-xs flex items-center gap-1 px-2 py-1 rounded-full border border-[#E8E2D9] text-[#8B7E74] hover:border-[#C8956C] hover:text-[#C8956C] transition-colors"
+                title="Configurar Gemini AI"
               >
-                + Agregar ítem manualmente
+                {hasGeminiKey ? '✨ Gemini ON' : '⚙️ Configurar IA'}
+              </button>
+              <button onClick={onClose} className="text-[#8B7E74] hover:text-[#1A1410] p-1">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+            {/* STEP: upload */}
+            {step === 'upload' && (
+              <>
+                {/* Banner si no tiene Gemini */}
+                {!hasGeminiKey && (
+                  <button
+                    onClick={() => setShowKeyModal(true)}
+                    className="w-full flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-left hover:bg-amber-100 transition-colors"
+                  >
+                    <span className="text-xl">✨</span>
+                    <div>
+                      <p className="text-sm font-medium text-amber-900">Activa Gemini AI para mejor lectura</p>
+                      <p className="text-xs text-amber-700">Gratis con cuenta Google · toca para configurar</p>
+                    </div>
+                  </button>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => cameraRef.current?.click()}
+                    className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
+                  >
+                    <span className="text-4xl">📷</span>
+                    <span className="font-medium text-sm text-[#1A1410]">Tomar foto</span>
+                    <span className="text-xs text-[#8B7E74]">Usar cámara</span>
+                  </button>
+                  <button
+                    onClick={() => galleryRef.current?.click()}
+                    className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[#E8E2D9] rounded-2xl p-6 hover:border-[#C8956C] hover:bg-[#FAF7F2] transition-all"
+                  >
+                    <span className="text-4xl">🖼️</span>
+                    <span className="font-medium text-sm text-[#1A1410]">Elegir foto</span>
+                    <span className="text-xs text-[#8B7E74]">Desde galería</span>
+                  </button>
+                </div>
+
+                <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+                <input ref={galleryRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+              </>
+            )}
+
+            {/* STEP: crop */}
+            {step === 'crop' && previewUrl && (
+              <CropTool
+                imageUrl={previewUrl}
+                onCrop={(dataUrl) => runOCR(dataUrl)}
+                onSkip={() => runOCR(previewUrl)}
+              />
+            )}
+
+            {/* STEP: scanning */}
+            {step === 'scanning' && (
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[#8B7E74]">{progressLabel || 'Analizando...'}</span>
+                    <span className="font-medium text-[#1A1410]">{progress}%</span>
+                  </div>
+                  <div className="w-full bg-[#E8E2D9] rounded-full h-2.5">
+                    <div className="bg-[#C8956C] h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${progress}%` }} />
+                  </div>
+                  <p className="text-xs text-[#8B7E74] text-center pt-1">
+                    {hasGeminiKey ? '✨ Gemini AI · via Google' : 'Tesseract.js · procesando en tu dispositivo'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* STEP: review */}
+            {step === 'review' && (
+              <div className="space-y-3">
+                {/* Badge del motor usado */}
+                {usedEngine && (
+                  <div className="flex items-center gap-1.5 text-xs text-[#8B7E74]">
+                    <span>{usedEngine === 'gemini' ? '✨ Analizado con Gemini AI' : '🔤 Analizado con Tesseract OCR'}</span>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3 py-2">
+                    {error}
+                  </div>
+                )}
+
+                {scanned.length > 0 && (
+                  <p className="text-sm text-[#8B7E74]">
+                    {scanned.length} ítem{scanned.length !== 1 ? 's' : ''} detectados · edita si algo está mal
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  {scanned.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2 bg-[#FAF7F2] rounded-xl px-3 py-2 border border-[#E8E2D9]">
+                      <input
+                        value={item.name}
+                        onChange={(e) => updateItem(i, { name: e.target.value })}
+                        className="flex-1 text-sm bg-transparent focus:outline-none min-w-0"
+                        placeholder="Nombre del ítem"
+                      />
+                      <span className="text-[#E8E2D9] flex-shrink-0">|</span>
+                      <input
+                        type="number"
+                        value={item.price || ''}
+                        onChange={(e) => updateItem(i, { price: parseFloat(e.target.value) || 0 })}
+                        className="w-24 text-sm text-right bg-transparent focus:outline-none font-medium flex-shrink-0"
+                        placeholder="Precio"
+                        min="0"
+                      />
+                      <button onClick={() => removeItem(i)} className="text-[#8B7E74] hover:text-red-500 transition-colors flex-shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => setScanned((prev) => [...prev, { name: '', price: 0 }])}
+                  className="w-full text-sm text-[#C8956C] border border-dashed border-[#C8956C] rounded-xl py-2 hover:bg-[#FAF7F2] transition-colors"
+                >
+                  + Agregar ítem manualmente
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          {step === 'review' && (
+            <div className="p-4 border-t border-[#E8E2D9] shrink-0 space-y-2">
+              <button
+                onClick={() => { onScan(validItems); onClose(); }}
+                disabled={validItems.length === 0}
+                className="w-full bg-[#1A1410] text-white rounded-xl py-3 font-medium hover:bg-[#2d2420] transition-colors disabled:opacity-40"
+              >
+                Agregar {validItems.length} ítem{validItems.length !== 1 ? 's' : ''} al ticket
+              </button>
+              <button onClick={reset} className="w-full text-sm text-[#8B7E74] hover:text-[#1A1410] py-1 transition-colors">
+                Escanear otra foto
               </button>
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        {step === 'review' && (
-          <div className="p-4 border-t border-[#E8E2D9] shrink-0 space-y-2">
-            <button
-              onClick={handleConfirm}
-              disabled={validItems.length === 0}
-              className="w-full bg-[#1A1410] text-white rounded-xl py-3 font-medium hover:bg-[#2d2420] transition-colors disabled:opacity-40"
-            >
-              Agregar {validItems.length} ítem{validItems.length !== 1 ? 's' : ''} al ticket
-            </button>
-            <button
-              onClick={reset}
-              className="w-full text-sm text-[#8B7E74] hover:text-[#1A1410] py-1 transition-colors"
-            >
-              Escanear otra foto
-            </button>
-          </div>
-        )}
       </div>
-    </div>
+
+      {showKeyModal && (
+        <GeminiKeyModal
+          onClose={() => setShowKeyModal(false)}
+          onSaved={() => setHasGeminiKey(true)}
+        />
+      )}
+    </>
   );
 }
