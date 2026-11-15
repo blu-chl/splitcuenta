@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import type { SplitState, PersonSummary } from '@/types';
 import { calculateSplit, formatCurrency, totalBill } from '@/lib/calculations';
+import SectionCard from './SectionCard';
 
 interface Props {
   state: SplitState;
@@ -15,23 +16,25 @@ export default function Summary({ state }: Props) {
 
   if (state.people.length === 0 || state.items.length === 0) {
     return (
-      <section className="bg-white rounded-2xl border border-[#E8E2D9] p-4 shadow-sm">
-        <h2 className="font-heading text-lg text-[#1A1410] mb-2">Resumen</h2>
+      <SectionCard step={4} title="Resumen" delay={180}>
         <p className="text-[#8B7E74] text-sm text-center py-4">
-          Agregá personas e ítems para ver el resumen
+          Agrega personas e ítems para ver cuánto paga cada uno
         </p>
-      </section>
+      </SectionCard>
     );
   }
 
   return (
-    <section className="bg-white rounded-2xl border border-[#E8E2D9] p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-heading text-lg text-[#1A1410]">Resumen</h2>
+    <SectionCard
+      step={4}
+      title="Resumen"
+      delay={180}
+      action={
         <span className="text-sm text-[#8B7E74]">
-          Total: <span className="font-medium text-[#1A1410]">{formatCurrency(total, currency)}</span>
+          Total: <span className="font-semibold text-[#1A1410] tabular-nums">{formatCurrency(total, currency)}</span>
         </span>
-      </div>
+      }
+    >
 
       <ul className="space-y-2">
         {summaries.map((s: PersonSummary) => (
@@ -88,6 +91,6 @@ export default function Summary({ state }: Props) {
           </li>
         ))}
       </ul>
-    </section>
+    </SectionCard>
   );
 }
