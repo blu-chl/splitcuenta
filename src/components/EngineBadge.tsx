@@ -5,7 +5,7 @@ export type Engine = 'gemini' | 'tesseract';
 interface Props {
   engine: Engine;
   /** Gemini falló y se usó Tesseract de respaldo */
-  fellBack?: boolean;
+  fellBack?: boolean | string;
   className?: string;
 }
 
@@ -37,7 +37,9 @@ export default function EngineBadge({ engine, fellBack = false, className = '' }
         <p className="text-sm font-medium text-[#1A1410] leading-tight">{name}</p>
         <p className="text-xs text-[#8B7E74] leading-snug">{detail}</p>
         {fellBack && (
-          <p className="text-xs text-amber-700 mt-0.5">Gemini falló · se usó el OCR local de respaldo</p>
+          <p className="text-xs text-amber-700 mt-0.5">
+            Gemini falló{typeof fellBack === 'string' ? `: ${fellBack}` : ''} · se usó el OCR local de respaldo
+          </p>
         )}
       </div>
     </div>

@@ -16,10 +16,33 @@ Reglas:
 - Si no encuentras ítems, devuelve []
 - No incluyas ningún texto fuera del JSON`;
 
+const MAX_SIDE = 2000;   // suficiente para leer texto de boleta sin pasarse del límite de la API
+const JPEG_QUALITY = 0.9;
+
+/**
+ * Acepta una URL blob: o un data URL (PNG/JPEG de cualquier tamaño) y devuelve un
+ * data URL JPEG de máx. 2000px. Una foto de celular en PNG pesa decenas de MB y
+ * supera el límite de la API; una URL blob: ni siquiera es un data URL.
+ */
+async function toJpegDataUrl(source: string): Promise<string> {
+  const img = new Image();
+  img.src = source;
+  await img.decode();
+  const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+}
+
 export async function scanWithGemini(
-  imageDataUrl: string,
+  imageSource: string,
   apiKey: string,
 ): Promise<ScannedItem[]> {
+  const imageDataUrl = await toJpegDataUrl(imageSource);
   // Extraer base64 puro (sin el prefijo data:image/...;base64,)
   const [header, base64] = imageDataUrl.split(',');
   const mimeType = header.match(/data:([^;]+)/)?.[1] ?? 'image/jpeg';

@@ -26,7 +26,7 @@ export default function ScannerModal({ onScan, onClose, initialFile }: Props) {
   const [scanned, setScanned] = useState<ScannedItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usedEngine, setUsedEngine] = useState<'gemini' | 'tesseract' | null>(null);
-  const [fellBack, setFellBack] = useState(false);
+  const [fellBack, setFellBack] = useState<string | false>(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
   // El modal solo se monta al hacer clic (cliente), así que leer localStorage acá es seguro
   const [hasGeminiKey, setHasGeminiKey] = useState(() => !!getGeminiKey());
@@ -64,7 +64,7 @@ export default function ScannerModal({ onScan, onClose, initialFile }: Props) {
           return;
         } catch (geminiErr) {
           console.warn('Gemini falló, usando Tesseract:', geminiErr);
-          setFellBack(true);
+          setFellBack(geminiErr instanceof Error ? geminiErr.message : 'error desconocido');
           setUsedEngine('tesseract');
         }
       }
