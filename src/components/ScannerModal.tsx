@@ -8,33 +8,15 @@ import GeminiKeyModal from './GeminiKeyModal';
 import EngineBadge from './EngineBadge';
 
 interface Props {
-  currency: string;
-  tip: number;
   onScan: (items: ScannedItem[]) => void;
-  onTipChange: (tip: number) => void;
   onClose: () => void;
 }
 
 type Step = 'upload' | 'crop' | 'scanning' | 'review';
 
-async function asPrepared(src: string): Promise<PreparedImage> {
-  // Si el preprocesamiento falla, se usa la foto tal cual
-  try {
-    return await prepareReceiptImage(src);
-  } catch (e) {
-    console.error(e);
-    const img = new Image();
-    img.src = src;
-    await img.decode();
-    return { dataUrl: src, width: img.naturalWidth, height: img.naturalHeight, angle: 0, cropped: false };
-  }
-}
-
-export default function ScannerModal({ currency, tip, onScan, onTipChange, onClose }: Props) {
+export default function ScannerModal({ onScan, onClose }: Props) {
   const [step, setStep] = useState<Step>('upload');
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [prepared, setPrepared] = useState<PreparedImage | null>(null);
-  const [receipt, setReceipt] = useState<ParsedReceipt | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [scanned, setScanned] = useState<ScannedItem[]>([]);
@@ -56,9 +38,6 @@ export default function ScannerModal({ currency, tip, onScan, onTipChange, onClo
     setStep('scanning');
     setProgress(5);
     setError(null);
-    setPrepared(null);
-    setProgress(5);
-    setStage('Buscando la boleta en la foto…');
 
     try {
       const apiKey = getGeminiKey();
@@ -95,10 +74,9 @@ export default function ScannerModal({ currency, tip, onScan, onTipChange, onClo
       setProgressLabel('Reconociendo texto...');
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('spa+eng', 1, {
-        logger: (m) => {
+        logger: (m: { status: string; progress: number }) => {
           if (m.status === 'recognizing text') {
-            setStage('Leyendo el texto…');
-            setProgress(25 + Math.round(m.progress * 70));
+            setProgress(30 + Math.round(m.progress * 60));
           }
         },
       });
@@ -125,12 +103,8 @@ export default function ScannerModal({ currency, tip, onScan, onTipChange, onClo
     }
   };
 
-  // Elegir foto → procesar directo (el recorte a mano queda como plan B)
-  const handleFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    setPhotoUrl(url);
-    runScan(url);
-  };
+  const updateItem = (i: number, patch: Partial<ScannedItem>) =>
+    setScanned((prev) => prev.map((item, idx) => (idx === i ? { ...item, ...patch } : item)));
 
   const removeItem = (i: number) =>
     setScanned((prev) => prev.filter((_, idx) => idx !== i));
@@ -139,9 +113,8 @@ export default function ScannerModal({ currency, tip, onScan, onTipChange, onClo
 
   const reset = () => {
     setStep('upload');
-    setPhotoUrl(null);
-    setPrepared(null);
-    setReceipt(null);
+    setPreviewUrl(null);
+    setScanned([]);
     setError(null);
     setProgress(0);
     setProgressLabel('');

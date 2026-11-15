@@ -9,17 +9,15 @@ interface Props {
   items: Item[];
   people: Person[];
   currency: string;
-  tip: number;
   onAdd: (name?: string, price?: number) => void;
   onUpdate: (id: string, patch: Partial<Pick<Item, 'name' | 'price'>>) => void;
   onRemove: (id: string) => void;
   onTogglePerson: (itemId: string, personId: string) => void;
   onAddScanned: (items: ScannedItem[]) => void;
-  onTipChange: (tip: number) => void;
 }
 
 export default function ItemsList({
-  items, people, currency, tip, onAdd, onUpdate, onRemove, onTogglePerson, onAddScanned, onTipChange,
+  items, people, currency, onAdd, onUpdate, onRemove, onTogglePerson, onAddScanned,
 }: Props) {
   const [showScanner, setShowScanner] = useState(false);
   const unassignedCount = items.filter((i) => i.assignedTo.length === 0).length;
@@ -159,10 +157,7 @@ export default function ItemsList({
 
       {showScanner && (
         <ScannerModal
-          currency={currency}
-          tip={tip}
           onScan={onAddScanned}
-          onTipChange={onTipChange}
           onClose={() => setShowScanner(false)}
         />
       )}
